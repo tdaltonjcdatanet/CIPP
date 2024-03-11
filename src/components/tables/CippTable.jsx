@@ -23,13 +23,24 @@ import {
 import DataTable, { createTheme } from 'react-data-table-component'
 import PropTypes from 'prop-types'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCheck, faColumns, faSearch, faSync, faTasks } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCheck,
+  faClipboard,
+  faColumns,
+  faCopy,
+  faFileCsv,
+  faFilePdf,
+  faSearch,
+  faSync,
+  faTasks,
+} from '@fortawesome/free-solid-svg-icons'
 import { cellGenericFormatter } from './CellGenericFormat'
 import { ModalService } from '../utilities'
 import { useLazyGenericGetRequestQuery, useLazyGenericPostRequestQuery } from 'src/store/api/app'
 import { ConfirmModal } from '../utilities/SharedModal'
 import { debounce } from 'lodash-es'
 import { useSearchParams } from 'react-router-dom'
+import CopyToClipboard from 'react-copy-to-clipboard'
 
 const FilterComponent = ({ filterText, onFilter, onClear, filterlist, onFilterPreset }) => (
   <>
@@ -177,7 +188,6 @@ export default function CippTable({
     (e) => {
       if (graphFilterFunction) {
         graphFilterFunction(e)
-        console.log(e)
       }
     },
     [graphFilterFunction],
@@ -379,14 +389,43 @@ export default function CippTable({
               }
               const newModalBody = {}
               for (let [objName, objValue] of Object.entries(modalBody)) {
-                if (objValue.toString().startsWith('!')) {
+                if (typeof objValue === 'object' && objValue !== null) {
+                  newModalBody[objName] = {}
+                  for (let [nestedObjName, nestedObjValue] of Object.entries(objValue)) {
+                    if (typeof nestedObjValue === 'string' && nestedObjValue.startsWith('!')) {
+                      newModalBody[objName][nestedObjName] = row[nestedObjValue.replace('!', '')]
+                    } else {
+                      newModalBody[objName][nestedObjName] = nestedObjValue
+                    }
+                  }
+                } else if (typeof objValue === 'string' && objValue.startsWith('!')) {
                   newModalBody[objName] = row[objValue.replace('!', '')]
+                } else {
+                  newModalBody[objName] = objValue
                 }
               }
               const NewModalUrl = `${modalUrl.split('?')[0]}?${urlParams.toString()}`
+              const selectedValue = inputRef.current.value
+              let additionalFields = {}
+              if (inputRef.current.nodeName === 'SELECT') {
+                const selectedItem = dropDownInfo.data.find(
+                  (item) => item[modalDropdown.valueField] === selectedValue,
+                )
+                if (selectedItem && modalDropdown.addedField) {
+                  Object.keys(modalDropdown.addedField).forEach((key) => {
+                    additionalFields[key] = selectedItem[modalDropdown.addedField[key]]
+                  })
+                }
+              }
+
               const results = await genericPostRequest({
                 path: NewModalUrl,
-                values: { ...modalBody, ...newModalBody, ...{ input: inputRef.current.value } },
+                values: {
+                  ...modalBody,
+                  ...newModalBody,
+                  ...additionalFields,
+                  ...{ input: inputRef.current.value },
+                },
               })
               resultsarr.push(results)
               setMassResults(resultsarr)
@@ -456,6 +495,7 @@ export default function CippTable({
     }
 
     const executeselectedAction = (item) => {
+      console.log(item)
       setModalContent({
         item,
       })
@@ -546,6 +586,9 @@ export default function CippTable({
         let output = {}
         for (let k in obj) {
           let val = obj[k]
+          if (val === null) {
+            val = ''
+          }
           const newKey = prefix ? prefix + '.' + k : k
           if (typeof val === 'object') {
             if (Array.isArray(val)) {
@@ -563,6 +606,14 @@ export default function CippTable({
         return output
       }
       filtered = filtered.map((item) => flatten(item))
+
+      let dataFlat
+
+      if (Array.isArray(data)) {
+        dataFlat = data.map((item) => flatten(item))
+      } else {
+        dataFlat = []
+      }
 
       if (!disablePDFExport) {
         if (dynamicColumns === true) {
@@ -613,19 +664,71 @@ export default function CippTable({
         }
 
         defaultActions.push([
-          <ExportPDFButton
-            key="export-pdf-action"
-            pdfData={filtered}
-            pdfHeaders={columns}
-            pdfSize="A4"
-            reportName={reportName}
-          />,
+          <CDropdown key={'pdf-selector'} className="me-2" variant="input-group">
+            <CDropdownToggle
+              className="btn btn-primary btn-sm m-1"
+              size="sm"
+              style={{
+                backgroundColor: '#f88c1a',
+              }}
+            >
+              <FontAwesomeIcon icon={faFilePdf} />
+            </CDropdownToggle>
+            <CDropdownMenu>
+              {dataKeys() && (
+                <>
+                  <ExportPDFButton
+                    key="export-pdf-action-visible"
+                    pdfData={filtered}
+                    pdfHeaders={columns}
+                    pdfSize="A4"
+                    reportName={reportName}
+                    nameText="Export Visible Columns"
+                  />
+                </>
+              )}
+            </CDropdownMenu>
+          </CDropdown>,
         ])
       }
 
       if (!disableCSVExport) {
         defaultActions.push([
-          <ExportCsvButton key="export-csv-action" csvData={filtered} reportName={reportName} />,
+          <>
+            <CDropdown key={'csv-selector'} className="me-2" variant="input-group">
+              <CDropdownToggle
+                className="btn btn-primary btn-sm m-1"
+                size="sm"
+                style={{
+                  backgroundColor: '#f88c1a',
+                }}
+              >
+                <FontAwesomeIcon icon={faFileCsv} />
+              </CDropdownToggle>
+              <CDropdownMenu>
+                {dataKeys() && (
+                  <>
+                    <CDropdownItem>
+                      <ExportCsvButton
+                        key="export-csv-action-visible"
+                        csvData={filtered}
+                        reportName={reportName}
+                        nameText="Export Visible Columns"
+                      />
+                    </CDropdownItem>
+                    <CDropdownItem>
+                      <ExportCsvButton
+                        key="export-csv-action-all"
+                        csvData={dataFlat}
+                        reportName={reportName}
+                        nameText="Export All Columns"
+                      />
+                    </CDropdownItem>
+                  </>
+                )}
+              </CDropdownMenu>
+            </CDropdown>
+          </>,
         ])
       }
     }
@@ -686,8 +789,15 @@ export default function CippTable({
     columns,
     reportName,
     selectedRows,
+    filteredItems,
   ])
   const tablePageSize = useSelector((state) => state.app.tablePageSize)
+  const [codeCopied, setCodeCopied] = useState(false)
+
+  const onCodeCopied = () => {
+    setCodeCopied(true)
+    setTimeout(() => setCodeCopied(false), 2000)
+  }
 
   return (
     <div className="ms-n3 me-n3 cipp-tablewrapper">
@@ -717,6 +827,20 @@ export default function CippTable({
                             {message.data?.Metadata?.Heading}
                           </CAccordionHeader>
                           <CAccordionBody>
+                            <CopyToClipboard text={results} onCopy={() => onCodeCopied()}>
+                              <CButton
+                                color={codeCopied ? 'success' : 'info'}
+                                className="cipp-code-copy-button"
+                                size="sm"
+                                variant="ghost"
+                              >
+                                {codeCopied ? (
+                                  <FontAwesomeIcon icon={faClipboard} />
+                                ) : (
+                                  <FontAwesomeIcon icon={faCopy} />
+                                )}
+                              </CButton>
+                            </CopyToClipboard>
                             {results.map((line, i) => {
                               return <li key={i}>{line}</li>
                             })}
@@ -730,7 +854,27 @@ export default function CippTable({
                   massResults.map((message, idx) => {
                     const results = message.data?.Results
                     const displayResults = Array.isArray(results) ? results.join(', ') : results
-                    return <li key={`message-${idx}`}>{displayResults}</li>
+                    return (
+                      <>
+                        <li key={`message-${idx}`}>
+                          {displayResults}
+                          <CopyToClipboard text={displayResults} onCopy={() => onCodeCopied()}>
+                            <CButton
+                              color={codeCopied ? 'success' : 'info'}
+                              className="cipp-code-copy-button"
+                              size="sm"
+                              variant="ghost"
+                            >
+                              {codeCopied ? (
+                                <FontAwesomeIcon icon={faClipboard} />
+                              ) : (
+                                <FontAwesomeIcon icon={faCopy} />
+                              )}
+                            </CButton>
+                          </CopyToClipboard>
+                        </li>
+                      </>
+                    )
                   })}
                 {loopRunning && (
                   <li>
